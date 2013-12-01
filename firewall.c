@@ -110,7 +110,7 @@ int main(int argc,char *argv[])
 		ETH1_IP = argv[6];
 		ETH1_MAC = argv[7];
 		rules_file = argv[8];
-		fp = fopen(rules_file,"r");
+//		fp = fopen(rules_file,"r");
 
 		err = pthread_create((tid + 0), NULL, capture_packet_eth1, NULL);
 		if (err != 0)
@@ -128,7 +128,7 @@ int main(int argc,char *argv[])
 		pthread_join((tid[1]), NULL);
 
 	}
-	fclose(fp);
+//	fclose(fp);
 	return(0);
 }
 
@@ -416,6 +416,7 @@ void replace_destination_mac(struct ether_header *eptr, char* dest){
 		for( i = 0; i < 6; i++){
 			eptr->ether_dhost[i] = (u_int8_t)(ether_d->ether_addr_octet[i]);
 		}
+		macptr = NULL;
 	}
 }
 
@@ -480,40 +481,63 @@ void write_packet(){
 }
 
 void addinArpTable(char*ip, char*mac){
-	struct my_struct *t, *s;
+	struct my_struct *t, *s, *u, *tmp;
 	struct timeval tv;
+	char* addip;
+	addip = (char *)malloc(strlen(ip) + 1);
+	strncpy(addip, ip, strlen(ip) + 1);
+
+	char* addmac;
+	addmac = (char *)malloc(strlen(mac) + 1);
+	strncpy(addmac, mac, strlen(mac) + 1);
+
 	time_t current;
 	HASH_FIND_STR(arptable, ip,t);
 	if(t == NULL){
 		s = malloc(sizeof(struct my_struct));
-		s->ip= ip;
-		s->val.macptr = mac;
+		s->ip= addip;
+		s->val.macptr = addmac;
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		s->val.timestamp = current;
 		HASH_ADD_KEYPTR( hh, arptable, s->ip, strlen(s->ip), s );
+		printf("Added ip %s in arp table\n", ip);
+	}
+	HASH_ITER(hh, arptable, u, tmp) {
+			printf("After adding %s\n",u->ip);
+			printf("After adding %s\n",u->val.macptr);
+
 	}
 
 }
 
 char* checkinArpTable(char* ip){
-	struct my_struct *t;
+	struct my_struct *t, *s,*tmp;
 	struct timeval tv;
 	time_t current;
 	time_t prev;
-	HASH_FIND_STR(arptable, ip,t);
+	char* checkip;
+	checkip = (char *)malloc(strlen(ip) + 1);
+	strncpy(checkip, ip, strlen(ip) + 1);
+	HASH_ITER(hh, arptable, s, tmp) {
+		printf("******%s\n",s->ip);
+	}
+	HASH_FIND_STR(arptable, checkip,t);
 	if(t != NULL){
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		prev = t->val.timestamp;
 		if(difftime(current, prev) > 60){
+			printf("Deleting %s as this is stale\n", checkip);
 			HASH_DEL(arptable, t);  /* user: pointer to deletee */
 			free(t);
 			return NULL;
 		}else{
+			printf("Already present ip - %s. returning it\n", checkip);
 			return t->val.macptr;
 		}
 	}
+	printf("Not in arptable %s", checkip);
 	return NULL;
 }
 
@@ -533,7 +557,7 @@ char* arping(char* ip){
 	FILE *ptr;
 	if ((ptr = popen(cmd, "r")) != NULL)
 	while (fgets(buf, BUFSIZ, ptr) != NULL){
-	  (void) printf("%s", buf);
+//	  (void) printf("%s", buf);
 	  int i = 0, j = 0;
 	  int is_capture = 0;
 	  while(buf[i]){
@@ -563,36 +587,36 @@ char* arping(char* ip){
 
 int scan_packet(char *src,char *dest,u_int16_t sport,u_int16_t dport)
 {
-	file_record frecord;
-	rewind(fp);
-
-	while(!feof(fp))
-	{
-		fscanf(fp,"%s %s %d %d %d",frecord.s_addr,frecord.d_addr,&frecord.s_port,&frecord.d_port,&frecord.decision);
-//		puts("Entered");
-//		puts(frecord.s_addr);
-		if(strcmp(frecord.s_addr,src) == 0)
-		{
-//			puts("Matched Src");
-			if(strcmp(frecord.d_addr,dest) == 0)
-			{
-//				puts("Matched Dst");
-				if(frecord.s_port == sport)
-				{
-//					puts("Matched Src port");
-
-					if(frecord.d_port == dport)
-					{
-//						puts("Matched Dst port");
-//						printf("Decision: %d\n",frecord.decision);
-						return(frecord.decision);
-					}
-				}
-			}
-		}
-
-	}
-	return(0);
+//	file_record frecord;
+//	rewind(fp);
+//
+//	while(!feof(fp))
+//	{
+//		fscanf(fp,"%s %s %d %d %d",frecord.s_addr,frecord.d_addr,&frecord.s_port,&frecord.d_port,&frecord.decision);
+////		puts("Entered");
+////		puts(frecord.s_addr);
+//		if(strcmp(frecord.s_addr,src) == 0)
+//		{
+////			puts("Matched Src");
+//			if(strcmp(frecord.d_addr,dest) == 0)
+//			{
+////				puts("Matched Dst");
+//				if(frecord.s_port == sport)
+//				{
+////					puts("Matched Src port");
+//
+//					if(frecord.d_port == dport)
+//					{
+////						puts("Matched Dst port");
+////						printf("Decision: %d\n",frecord.decision);
+//						return(frecord.decision);
+//					}
+//				}
+//			}
+//		}
+//
+//	}
+	return(1);
 
 }
 
