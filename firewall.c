@@ -416,7 +416,6 @@ void replace_destination_mac(struct ether_header *eptr, char* dest){
 		for( i = 0; i < 6; i++){
 			eptr->ether_dhost[i] = (u_int8_t)(ether_d->ether_addr_octet[i]);
 		}
-		macptr = NULL;
 	}
 }
 
@@ -496,7 +495,8 @@ void addinArpTable(char*ip, char*mac){
 	if(t == NULL){
 		s = malloc(sizeof(struct my_struct));
 		s->ip= addip;
-		s->val.macptr = addmac;
+		s->val.macptr = (char *)malloc(strlen(addmac) + 1);
+		strncpy(s->val.macptr, addmac, strlen(addmac) + 1);
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		s->val.timestamp = current;
@@ -508,7 +508,8 @@ void addinArpTable(char*ip, char*mac){
 			printf("After adding %s\n",u->val.macptr);
 
 	}
-
+	free(addip);
+	free(addmac);
 }
 
 char* checkinArpTable(char* ip){
@@ -521,6 +522,7 @@ char* checkinArpTable(char* ip){
 	strncpy(checkip, ip, strlen(ip) + 1);
 	HASH_ITER(hh, arptable, s, tmp) {
 		printf("******%s\n",s->ip);
+		printf("******%s\n",s->val.macptr);
 	}
 	HASH_FIND_STR(arptable, checkip,t);
 	if(t != NULL){
@@ -538,6 +540,7 @@ char* checkinArpTable(char* ip){
 		}
 	}
 	printf("Not in arptable %s", checkip);
+	free(checkip);
 	return NULL;
 }
 
