@@ -45,7 +45,6 @@ char* ETH1_IP = "20.10.1.128";
 
 int is_incoming_to_eth1;
 int is_offline;
-pthread_t tid[2];
 
 struct arpvalue
 {
@@ -81,6 +80,8 @@ struct my_struct *arptable;
 int main(int argc,char *argv[])
 {
 	arptable = NULL;    /* important! initialize to NULL */
+    int err;
+    pthread_t tid[2];
 
 	if(argc <= 1){
 		printf("Enter the arguments\n");
@@ -111,17 +112,21 @@ int main(int argc,char *argv[])
 		rules_file = argv[8];
 		fp = fopen(rules_file,"r");
 
-//		err = pthread_create(&(tid[0]), NULL, &capture_packet_eth1, NULL);
-//		if (err != 0)
-//			printf("\ncan't create thread :[%s]", strerror(err));
-//		else
-//			printf("\n Thread created successfully\n");
-//
-//		err = pthread_create(&(tid[1]), NULL, &capture_packet_eth0, NULL);
-//		if (err != 0)
-//			printf("\ncan't create thread :[%s]", strerror(err));
-//		else
-//			printf("\n Thread created successfully\n");
+		err = pthread_create((tid + 0), NULL, capture_packet_eth1, NULL);
+		if (err != 0)
+			printf("\ncan't create thread :[%s]", strerror(err));
+		else
+			printf("\n Thread created successfully\n");
+
+		err = pthread_create((tid + 1), NULL, capture_packet_eth0, NULL);
+		if (err != 0)
+			printf("\ncan't create thread :[%s]", strerror(err));
+		else
+			printf("\n Thread created successfully\n");
+
+		pthread_join((tid[0]), NULL);
+		pthread_join((tid[1]), NULL);
+
 	}
 	fclose(fp);
 	return(0);
