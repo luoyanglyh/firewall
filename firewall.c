@@ -25,14 +25,14 @@ void packet_read(int,char *,pcap_t *);
 char* next_packet(int *,pcap_t *);
 void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *orgptr);
 int scan_packet(char *,char *,u_int16_t,u_int16_t);
-void replace_destination_mac(struct ether_header *eptr, char* dest);
-void replace_source_mac(struct ether_header *eptr);
-void inject_packet(char *ptr, int len);
-char* arping(char* ip);
+void replace_destination_mac(struct ether_header *eptr, char* dest, int is_incoming_to_eth1);
+void replace_source_mac(struct ether_header *eptr, int is_incoming_to_eth1);
+void inject_packet(char *ptr, int len, int is_incoming_to_eth1);
+char* arping(char* ip, int is_incoming_to_eth1);
 void capture_packet_device();
 void write_packet();
 void offline_packet_read();
-void identify_eth0_eth1(char* src);
+int identify_eth0_eth1(char* src);
 char* checkinArpTable(char* ip);
 void addinArpTable(char*ip, char*mac);
 
@@ -42,13 +42,19 @@ char* ETH0_MAC = "00:0c:29:7b:00:69";
 char* ETH1_MAC = "00:0c:29:7b:00:73";
 char* ETH0_IP = "30.10.1.128";
 char* ETH1_IP = "20.10.1.128";
+typedef struct filtering_rules file_record;
 
-int is_incoming_to_eth1;
-int is_offline;
+FILE *fp;
+pcap_t *pd;          /* packet capture struct pointer */
+pcap_t *pdeth0;          /* packet capture struct pointer */
+pcap_t *pdeth1;          /* packet capture struct pointer */
+char* offline_file;
+char* rules_file;
+struct my_struct *arptable;
 
 struct arpvalue
 {
-	char* macptr;
+	char mac[18];
 	time_t timestamp;
 };
 
@@ -67,15 +73,7 @@ struct my_struct {
     UT_hash_handle hh;         /* makes this structure hashable */
 };
 
-typedef struct filtering_rules file_record;
 
-FILE *fp;
-pcap_t *pd;          /* packet capture struct pointer */
-pcap_t *pdeth0;          /* packet capture struct pointer */
-pcap_t *pdeth1;          /* packet capture struct pointer */
-char* offline_file;
-char* rules_file;
-struct my_struct *arptable;
 
 int main(int argc,char *argv[])
 {
@@ -92,7 +90,6 @@ int main(int argc,char *argv[])
 			printf("Enter 2 arguments after 0");
 			return 1;
 		}
-		is_offline = 1;
 		offline_file = argv[2];
 		rules_file = argv[3];
 		fp = fopen(rules_file,"r");
@@ -102,7 +99,6 @@ int main(int argc,char *argv[])
 			printf("Enter 7 arguments after 1");
 			return 1;
 		}
-		is_offline = 0;
 		ETH0 = argv[2];
 		ETH0_IP = argv[3];
 		ETH0_MAC = argv[4];
@@ -285,7 +281,7 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	dest = (char *)malloc(strlen(tempPtr) + 1);
 	strncpy(dest, tempPtr, strlen(tempPtr) + 1);
 
-	identify_eth0_eth1(src);
+	int is_incoming_to_eth1 = identify_eth0_eth1(src);
 	if(is_incoming_to_eth1 == -1){
 		return;
 	}
@@ -303,13 +299,13 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 		printf("On %s ", ETH0);
 	}
 	printf("Before srcip: %s srcmac: %s dstip: %s dstmac: %s\n",
-					src,srcmac,dest,dstmac);
+					src,srcmac,dest,dstmac );
 
 	//replace destination MAC
-	replace_destination_mac(orgeptr, dest);
+	replace_destination_mac(orgeptr, dest,is_incoming_to_eth1);
 
 	//replace source MAC
-	replace_source_mac(orgeptr);
+	replace_source_mac(orgeptr,is_incoming_to_eth1);
 
 	tempPtr = ether_ntoa((struct ether_addr *)&orgeptr->ether_shost);
 	srcmac = (char *)malloc(strlen(tempPtr) + 1);
@@ -326,7 +322,6 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	}
 	printf("After srcip: %s srcmac: %s dstip: %s dstmac: %s\n",
 				src,srcmac,dest,dstmac);
-
 	switch(iphdr->ip_p){
 	case IPPROTO_ICMP:
 		sport = -1;
@@ -348,7 +343,8 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	if(scan_packet(src,dest,sport,dport) == 1)
 	{
 		printf("Packet allowed by firewall\n");
-		inject_packet(orgptr, len+14);
+		printf("%s %s %d %d", src, dest, sport, dport);
+		inject_packet(orgptr, len+14, is_incoming_to_eth1);
 	}else{
 		printf("Packet blocked by firewall\n");
 	}
@@ -360,7 +356,7 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 }
 
 
-void identify_eth0_eth1(char* src){
+int identify_eth0_eth1(char* src){
 	int i =0, dot_count = 0;
 
 	while(dot_count < 2){
@@ -373,8 +369,7 @@ void identify_eth0_eth1(char* src){
 		i++;
 	}
 	if(dot_count == 2){
-		is_incoming_to_eth1 = 0;
-		return;
+		return 0;
 	}
 	dot_count = 0;
 	while(dot_count < 2){
@@ -387,30 +382,34 @@ void identify_eth0_eth1(char* src){
 		i++;
 	}
 	if(dot_count == 2){
-		is_incoming_to_eth1 = 1;
-		return;
+		return 1;
 	}
-	is_incoming_to_eth1 = -1;
+	return -1;
 
 
 }
-void inject_packet(char *ptr, int len){
+void inject_packet(char *ptr, int len, int is_incoming_to_eth1){
+	printf("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%");
 	if(is_incoming_to_eth1 == 1){
+		printf("Injecting on eth0\n");
 		pcap_inject(pdeth0,ptr,len);
 	}else if(is_incoming_to_eth1 == 0){
+		printf("Injecting on eth1\n");
 		pcap_inject(pdeth1,ptr,len);
+	}else{
+		printf("Not Injecting");
 	}
 }
 
-void replace_destination_mac(struct ether_header *eptr, char* dest){
+void replace_destination_mac(struct ether_header *eptr, char* dest, int is_incoming_to_eth1){
 	struct ether_addr *ether_d;
 	int i;
 	char *macptr = NULL;
-	if((macptr = checkinArpTable(dest)) == NULL){
-		macptr = arping(dest);
-		if(macptr != NULL)
-			addinArpTable(dest, macptr);
-	}
+//	if((macptr = checkinArpTable(dest)) == NULL){
+		macptr = arping(dest, is_incoming_to_eth1);
+//		if(macptr != NULL)
+//			addinArpTable(dest, macptr);
+//	}
 	if(macptr != NULL){
 		ether_d = ether_aton (macptr);
 		for( i = 0; i < 6; i++){
@@ -419,7 +418,7 @@ void replace_destination_mac(struct ether_header *eptr, char* dest){
 	}
 }
 
-void replace_source_mac(struct ether_header *eptr){
+void replace_source_mac(struct ether_header *eptr, int is_incoming_to_eth1){
 	struct ether_addr *ether_d;
 	int i;
 	if(is_incoming_to_eth1 == 0){
@@ -495,8 +494,7 @@ void addinArpTable(char*ip, char*mac){
 	if(t == NULL){
 		s = malloc(sizeof(struct my_struct));
 		s->ip= addip;
-		s->val.macptr = (char *)malloc(strlen(addmac) + 1);
-		strncpy(s->val.macptr, addmac, strlen(addmac) + 1);
+		strncpy(s->val.mac, addmac, strlen(addmac) + 1);
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		s->val.timestamp = current;
@@ -505,7 +503,7 @@ void addinArpTable(char*ip, char*mac){
 	}
 	HASH_ITER(hh, arptable, u, tmp) {
 			printf("After adding %s\n",u->ip);
-			printf("After adding %s\n",u->val.macptr);
+			printf("After adding %s\n",u->val.mac);
 
 	}
 	free(addip);
@@ -522,7 +520,7 @@ char* checkinArpTable(char* ip){
 	strncpy(checkip, ip, strlen(ip) + 1);
 	HASH_ITER(hh, arptable, s, tmp) {
 		printf("******%s\n",s->ip);
-		printf("******%s\n",s->val.macptr);
+		printf("******%s\n",s->val.mac);
 	}
 	HASH_FIND_STR(arptable, checkip,t);
 	if(t != NULL){
@@ -536,7 +534,7 @@ char* checkinArpTable(char* ip){
 			return NULL;
 		}else{
 			printf("Already present ip - %s. returning it\n", checkip);
-			return t->val.macptr;
+			return t->val.mac;
 		}
 	}
 	printf("Not in arptable %s", checkip);
@@ -544,7 +542,7 @@ char* checkinArpTable(char* ip){
 	return NULL;
 }
 
-char* arping(char* ip){
+char* arping(char* ip, int is_incoming_to_eth1){
 	char cmd[50] = "arping -c 1 -I ";
 	if(is_incoming_to_eth1 == 1){
 		strcat(cmd,ETH0);
