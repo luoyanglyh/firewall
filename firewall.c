@@ -68,12 +68,10 @@ struct filtering_rules
 };
 
 struct my_struct {
-    char* ip;                    /* key */
+    char ip[16];                    /* key */
     struct arpvalue val;
     UT_hash_handle hh;         /* makes this structure hashable */
 };
-
-
 
 int main(int argc,char *argv[])
 {
@@ -258,41 +256,35 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	int hlen;
 	struct ip *iphdr;
 	struct tcphdr *tcph;
-	char *src, *dest;
-	char *srcmac, *dstmac;
-	char *start;
-	char *tempPtr;
+	struct icmphdr *icmph;
+	struct udphdr *udph;
+	char  src[16], dest[16];
+	char srcmac[18], dstmac[18];
+//	char *start;
+//	char tempPtr[18];
 	u_int16_t sport,dport;
-	int size;
+    unsigned short id, seq;
+//	int size;
 	struct ether_header *orgeptr;
 	iphdr = (struct ip*) ptr;         /* Get IP header */
 	orgeptr = (struct ether_header *) orgptr;    /* Ethernet header = 14 bytes */
 
-	size = ntohs(iphdr->ip_len);
-	start = (char *)malloc(size);
-	memcpy(start,ptr,size);
+//	size = ntohs(iphdr->ip_len);
+//	start = (char *)malloc(size);
+//	memcpy(start,ptr,size);
 
 	hlen = iphdr->ip_hl * 4;
-	tempPtr = inet_ntoa(iphdr->ip_src);
-	src = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(src, tempPtr, strlen(tempPtr) + 1);
+	strncpy(src,inet_ntoa(iphdr->ip_src), 16);
 
-	tempPtr = inet_ntoa(iphdr->ip_dst);
-	dest = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(dest, tempPtr, strlen(tempPtr) + 1);
+	strncpy(dest, inet_ntoa(iphdr->ip_dst),16);
 
 	int is_incoming_to_eth1 = identify_eth0_eth1(src);
 	if(is_incoming_to_eth1 == -1){
 		return;
 	}
 
-	tempPtr = ether_ntoa((struct ether_addr *)&orgeptr->ether_shost);
-	srcmac = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(srcmac, tempPtr, strlen(tempPtr) + 1);
-
-	tempPtr = ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost);
-	dstmac = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(dstmac, tempPtr, strlen(tempPtr) + 1);
+	strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost),18);
+	strncpy(dstmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost), 18);
 	if(is_incoming_to_eth1 == 1){
 		printf("On %s ", ETH1);
 	}else{
@@ -307,13 +299,9 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	//replace source MAC
 	replace_source_mac(orgeptr,is_incoming_to_eth1);
 
-	tempPtr = ether_ntoa((struct ether_addr *)&orgeptr->ether_shost);
-	srcmac = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(srcmac, tempPtr, strlen(tempPtr) + 1);
+	strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost), 18);
 
-	tempPtr = ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost);
-	dstmac = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(dstmac, tempPtr, strlen(tempPtr) + 1);
+	strncpy(dstmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost), 18);
 
 	if(is_incoming_to_eth1 == 1){
 		printf("On %s ", ETH1);
@@ -324,8 +312,12 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 				src,srcmac,dest,dstmac);
 	switch(iphdr->ip_p){
 	case IPPROTO_ICMP:
+		icmph = (struct icmphdr *)ptr;
 		sport = -1;
 		dport = -1;
+		memcpy(&id, (u_char*)icmph+4, 2);
+		memcpy(&seq, (u_char*)icmph+6, 2);
+		printf("----------------ID:%d Seq:%d\n", ntohs(id), ntohs(seq));
 		break;
 	case IPPROTO_TCP:
 		ptr += hlen;
@@ -335,6 +327,7 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 		ptr += sizeof(struct tcphdr);
 		break;
 	case IPPROTO_UDP:
+		//port
 		break;
 	default:
 		break;
@@ -349,10 +342,10 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 		printf("Packet blocked by firewall\n");
 	}
 
-	free(src);
-	free(dest);
-	free(srcmac);
-	free(dstmac);
+//	free(src);
+//	free(dest);
+//	free(srcmac);
+//	free(dstmac);
 }
 
 
@@ -437,24 +430,19 @@ void dispatcher_handler(u_char *dumpfile,
 {
 	int hlen;
 	struct ip *iphdr;
-	char *src, *dest;
-	char *start;
-	char *tempPtr;
-	int size;
+	char src[16], dest[16];
+//	char *start;
+//	char *tempPtr;
+//	int size;
 
 	iphdr = (struct ip*)(pkt_data+14);         /* Get IP header */
-	size = ntohs(iphdr->ip_len);
-	start = (char *)malloc(size);
-	memcpy(start,pkt_data,size);
+//	size = ntohs(iphdr->ip_len);
+//	start = (char *)malloc(size);
+//	memcpy(start,pkt_data,size);
 
 	hlen = iphdr->ip_hl * 4;
-	tempPtr = inet_ntoa(iphdr->ip_src);
-	src = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(src, tempPtr, strlen(tempPtr) + 1);
-
-	tempPtr = inet_ntoa(iphdr->ip_dst);
-	dest = (char *)malloc(strlen(tempPtr) + 1);
-	strncpy(dest, tempPtr, strlen(tempPtr) + 1);
+	strncpy(src, inet_ntoa(iphdr->ip_src), 16);
+	strncpy(dest, inet_ntoa(iphdr->ip_dst), 16);
 	//save the packet on the dump file
 	if(scan_packet(src,dest, -1,-1) == 1){
 		pcap_dump(dumpfile,header,pkt_data);
@@ -481,20 +469,18 @@ void write_packet(){
 void addinArpTable(char*ip, char*mac){
 	struct my_struct *t, *s, *u, *tmp;
 	struct timeval tv;
-	char* addip;
-	addip = (char *)malloc(strlen(ip) + 1);
-	strncpy(addip, ip, strlen(ip) + 1);
+	char addip[16];
+	strncpy(addip, ip, 16);
 
-	char* addmac;
-	addmac = (char *)malloc(strlen(mac) + 1);
-	strncpy(addmac, mac, strlen(mac) + 1);
+	char addmac[18];
+	strncpy(addmac, mac, 18);
 
 	time_t current;
 	HASH_FIND_STR(arptable, ip,t);
 	if(t == NULL){
 		s = malloc(sizeof(struct my_struct));
-		s->ip= addip;
-		strncpy(s->val.mac, addmac, strlen(addmac) + 1);
+		strncpy(s->ip, addip, 16);
+		strncpy(s->val.mac, addmac, 18);
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		s->val.timestamp = current;
@@ -506,8 +492,7 @@ void addinArpTable(char*ip, char*mac){
 			printf("After adding %s\n",u->val.mac);
 
 	}
-	free(addip);
-	free(addmac);
+
 }
 
 char* checkinArpTable(char* ip){
@@ -515,9 +500,9 @@ char* checkinArpTable(char* ip){
 	struct timeval tv;
 	time_t current;
 	time_t prev;
-	char* checkip;
-	checkip = (char *)malloc(strlen(ip) + 1);
-	strncpy(checkip, ip, strlen(ip) + 1);
+	char checkip[16];
+//	checkip = (char *)malloc(strlen(ip) + 1);
+	strncpy(checkip, ip, 16);
 	HASH_ITER(hh, arptable, s, tmp) {
 		printf("******%s\n",s->ip);
 		printf("******%s\n",s->val.mac);
@@ -538,7 +523,7 @@ char* checkinArpTable(char* ip){
 		}
 	}
 	printf("Not in arptable %s", checkip);
-	free(checkip);
+//	free(checkip);
 	return NULL;
 }
 
