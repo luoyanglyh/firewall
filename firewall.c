@@ -51,6 +51,7 @@ pcap_t *pdeth1;          /* packet capture struct pointer */
 char* offline_file;
 char* rules_file;
 struct my_struct *arptable;
+pthread_rwlock_t lock;
 
 struct arpvalue
 {
@@ -78,6 +79,7 @@ int main(int argc,char *argv[])
 	arptable = NULL;    /* important! initialize to NULL */
     int err;
     pthread_t tid[2];
+    if (pthread_rwlock_init(&lock,NULL) != 0) printf("can't create rwlock");
 
 	if(argc <= 1){
 		printf("Enter the arguments\n");
@@ -260,19 +262,11 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	struct udphdr *udph;
 	char  src[16], dest[16];
 	char srcmac[18], dstmac[18];
-//	char *start;
-//	char tempPtr[18];
 	u_int16_t sport,dport;
     unsigned short id, seq;
-//	int size;
 	struct ether_header *orgeptr;
 	iphdr = (struct ip*) ptr;         /* Get IP header */
 	orgeptr = (struct ether_header *) orgptr;    /* Ethernet header = 14 bytes */
-
-//	size = ntohs(iphdr->ip_len);
-//	start = (char *)malloc(size);
-//	memcpy(start,ptr,size);
-
 	hlen = iphdr->ip_hl * 4;
 	strncpy(src,inet_ntoa(iphdr->ip_src), 16);
 
@@ -341,11 +335,6 @@ void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *o
 	}else{
 		printf("Packet blocked by firewall\n");
 	}
-
-//	free(src);
-//	free(dest);
-//	free(srcmac);
-//	free(dstmac);
 }
 
 
@@ -398,11 +387,11 @@ void replace_destination_mac(struct ether_header *eptr, char* dest, int is_incom
 	struct ether_addr *ether_d;
 	int i;
 	char *macptr = NULL;
-//	if((macptr = checkinArpTable(dest)) == NULL){
+	if((macptr = checkinArpTable(dest)) == NULL){
 		macptr = arping(dest, is_incoming_to_eth1);
-//		if(macptr != NULL)
-//			addinArpTable(dest, macptr);
-//	}
+		if(macptr != NULL)
+			addinArpTable(dest, macptr);
+	}
 	if(macptr != NULL){
 		ether_d = ether_aton (macptr);
 		for( i = 0; i < 6; i++){
@@ -431,14 +420,8 @@ void dispatcher_handler(u_char *dumpfile,
 	int hlen;
 	struct ip *iphdr;
 	char src[16], dest[16];
-//	char *start;
-//	char *tempPtr;
-//	int size;
 
 	iphdr = (struct ip*)(pkt_data+14);         /* Get IP header */
-//	size = ntohs(iphdr->ip_len);
-//	start = (char *)malloc(size);
-//	memcpy(start,pkt_data,size);
 
 	hlen = iphdr->ip_hl * 4;
 	strncpy(src, inet_ntoa(iphdr->ip_src), 16);
@@ -476,7 +459,11 @@ void addinArpTable(char*ip, char*mac){
 	strncpy(addmac, mac, 18);
 
 	time_t current;
+
+	if (pthread_rwlock_rdlock(&lock) != 0) printf("can't get rdlock");
 	HASH_FIND_STR(arptable, ip,t);
+	pthread_rwlock_unlock(&lock);
+
 	if(t == NULL){
 		s = malloc(sizeof(struct my_struct));
 		strncpy(s->ip, addip, 16);
@@ -484,7 +471,10 @@ void addinArpTable(char*ip, char*mac){
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		s->val.timestamp = current;
-		HASH_ADD_KEYPTR( hh, arptable, s->ip, strlen(s->ip), s );
+		if (pthread_rwlock_wrlock(&lock) != 0) printf("can't get wrlock");
+        HASH_ADD_STR( arptable, ip, s );
+        pthread_rwlock_unlock(&lock);
+//		HASH_ADD_KEYPTR( hh, arptable, s->ip, strlen(s->ip), s );
 		printf("Added ip %s in arp table\n", ip);
 	}
 	HASH_ITER(hh, arptable, u, tmp) {
@@ -501,20 +491,25 @@ char* checkinArpTable(char* ip){
 	time_t current;
 	time_t prev;
 	char checkip[16];
-//	checkip = (char *)malloc(strlen(ip) + 1);
 	strncpy(checkip, ip, 16);
 	HASH_ITER(hh, arptable, s, tmp) {
 		printf("******%s\n",s->ip);
 		printf("******%s\n",s->val.mac);
 	}
+
+	if (pthread_rwlock_rdlock(&lock) != 0) printf("can't get rdlock");
 	HASH_FIND_STR(arptable, checkip,t);
+	pthread_rwlock_unlock(&lock);
+
 	if(t != NULL){
 		gettimeofday(&tv,NULL);
 		current = &tv.tv_sec;
 		prev = t->val.timestamp;
 		if(difftime(current, prev) > 60){
 			printf("Deleting %s as this is stale\n", checkip);
+			if (pthread_rwlock_wrlock(&lock) != 0) printf("can't get wrlock");
 			HASH_DEL(arptable, t);  /* user: pointer to deletee */
+			pthread_rwlock_unlock(&lock);
 			free(t);
 			return NULL;
 		}else{
@@ -523,7 +518,6 @@ char* checkinArpTable(char* ip){
 		}
 	}
 	printf("Not in arptable %s", checkip);
-//	free(checkip);
 	return NULL;
 }
 
