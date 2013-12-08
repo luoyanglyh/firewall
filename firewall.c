@@ -44,7 +44,6 @@ char* ETH0_IP = "30.10.1.128";
 char* ETH1_IP = "20.10.1.128";
 typedef struct filtering_rules file_record;
 
-FILE *fp;
 pcap_t *pd;          /* packet capture struct pointer */
 pcap_t *pdeth0;          /* packet capture struct pointer */
 pcap_t *pdeth1;          /* packet capture struct pointer */
@@ -79,6 +78,8 @@ int main(int argc,char *argv[])
 	arptable = NULL;    /* important! initialize to NULL */
     int err;
     pthread_t tid[2];
+    FILE *fp;
+
     if (pthread_rwlock_init(&lock,NULL) != 0) printf("can't create rwlock");
 
 	if(argc <= 1){
