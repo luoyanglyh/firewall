@@ -1,0 +1,13 @@
+TCP
+Server
+ iperf -s -p 3301
+ 
+Client
+iperf -c 20.10.1.130 -p 3301
+ 
+ 
+UDP
+Server
+iperf -s -u -i 1
+client
+iperf -c 20.10.1.130 -u -b 10m
