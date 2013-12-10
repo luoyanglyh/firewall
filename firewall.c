@@ -24,9 +24,6 @@ typedef enum {SYN, SYNACK, ACK, FIN, FINACK, ENDACK, OTHER} State;
 
 void capture_packet_eth0();
 void capture_packet_eth1();
-void packet_read(int,char *,pcap_t *);
-char* next_packet(int *,pcap_t *);
-void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *orgptr);
 int scan_packet(char *src,char *dest,u_int16_t sport,u_int16_t dport, u_int8_t protocol, State state);
 int  replace_destination_mac(struct ether_header *eptr, char* dest, int is_incoming_to_eth1);
 void replace_source_mac(struct ether_header *eptr, int is_incoming_to_eth1);
@@ -37,6 +34,11 @@ char* checkinArpTable(char* ip);
 void addinArpTable(char*ip, char*mac);
 void readrulesfile(char *rule_file);
 int isAllowedByFirewall(char *src,char *dest,u_int16_t sport,u_int16_t dport);
+void send_reset_tcp_packet(char* src_ip, char* dst_ip, u_int16_t src_prt, u_int16_t dst_prt);
+void send_reset_icmp_packet(char* src_ip, char* dst_ip);
+State getState(struct tcphdr *tcph);
+
+
 
 char* ETH0 = "eth0";
 char* ETH1 = "eth1";
@@ -200,6 +202,8 @@ void parse_packet(u_char *user, struct pcap_pkthdr *packethdr,
     char iphdrInfo[256], src[256], dest[256];
     unsigned short id, seq;
     char srcmac[18], dstmac[18];
+    u_int16_t srcport, dstport;
+    int scanpacket;
 
     orgeptr = (struct ether_header *) packetptr;
     strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost),18);
@@ -234,27 +238,34 @@ void parse_packet(u_char *user, struct pcap_pkthdr *packethdr,
     switch (iphdr->ip_p)
     {
     case IPPROTO_TCP:
-//        tcphdr = (struct tcphdr*)packetptr;
-//        printf("TCP %s:%d -> %s:%d\n", srcip, ntohs(tcphdr->source),
-//               dstip, ntohs(tcphdr->dest));
-//        printf("%s\n", iphdrInfo);
-//        printf("%c%c%c%c%c%c Seq: 0x%x Ack: 0x%x Win: 0x%x TcpLen: %d\n",
-//               (tcphdr->urg ? 'U' : '*'),
-//               (tcphdr->ack ? 'A' : '*'),
-//               (tcphdr->psh ? 'P' : '*'),
-//               (tcphdr->rst ? 'R' : '*'),
-//               (tcphdr->syn ? 'S' : '*'),
-//               (tcphdr->fin ? 'F' : '*'),
-//               ntohl(tcphdr->seq), ntohl(tcphdr->ack_seq),
-//               ntohs(tcphdr->window), 4*tcphdr->doff);
+        tcphdr = (struct tcphdr*)packetptr;
+        printf("TCP %s:%d -> %s:%d\n", src, ntohs(tcphdr->source),
+               dest, ntohs(tcphdr->dest));
+        printf("%s\n", iphdrInfo);
+        srcport = tcphdr->source;
+        dstport = tcphdr->dest;
+        printf("%c%c%c%c%c%c Seq: 0x%x Ack: 0x%x Win: 0x%x TcpLen: %d\n",
+               (tcphdr->urg ? 'U' : '*'),
+               (tcphdr->ack ? 'A' : '*'),
+               (tcphdr->psh ? 'P' : '*'),
+               (tcphdr->rst ? 'R' : '*'),
+               (tcphdr->syn ? 'S' : '*'),
+               (tcphdr->fin ? 'F' : '*'),
+               ntohl(tcphdr->seq), ntohl(tcphdr->ack_seq),
+               ntohs(tcphdr->window), 4*tcphdr->doff);
+        State state = getState(tcphdr);
+        scanpacket = scan_packet(src,dest,srcport,dstport, IPPROTO_TCP, state);
         break;
 
     case IPPROTO_UDP:
-//        udphdr = (struct udphdr*)packetptr;
-//        printf("UDP %s:%d -> %s:%d\n", srcip, ntohs(udphdr->source),
-//               dstip, ntohs(udphdr->dest));
-//        printf("%s\n", iphdrInfo);
-//        break;
+        udphdr = (struct udphdr*)packetptr;
+        printf("UDP %s:%d -> %s:%d\n", src, ntohs(udphdr->source),
+               dest, ntohs(udphdr->dest));
+        printf("%s\n", iphdrInfo);
+        srcport = udphdr->source;
+        dstport = udphdr->dest;
+        scanpacket = scan_packet(src,dest,srcport,dstport, IPPROTO_UDP, SYN);
+        break;
 
     case IPPROTO_ICMP:
         icmphdr = (struct icmphdr*)packetptr;
@@ -264,254 +275,57 @@ void parse_packet(u_char *user, struct pcap_pkthdr *packethdr,
         memcpy(&seq, (u_char*)icmphdr+6, 2);
         printf("Type:%d Code:%d ID:%d Seq:%d\n", icmphdr->type, icmphdr->code,
                ntohs(id), ntohs(seq));
-		if(scan_packet(src,dest,1,1, IPPROTO_ICMP, SYN) != 0 ) {
-//			printf("Packet allowed by firewall\n");
-
-			printf("tcp check----------------ID:%d Seq:%d\n", ntohs(id), ntohs(seq));
-			printf("------------%s %s %d %d\n", src, dest, 1, 1);
-//			printf("Calling inject packet with %d\n", is_incoming_to_eth1);
-//			if(16384 == ntohs(seq)){
-//				printf("Culprit in tcp_check!!!!!!!");
-//				return;
-//			}
-			//replace destination MAC
-			if(replace_destination_mac(orgeptr, dest,is_incoming_to_eth1) == -1 ) {
-
-				printf("Mannnn Error in repalcing destination!\n");
-				return;
-			}
-
-			//replace source MAC
-			replace_source_mac(orgeptr,is_incoming_to_eth1);
-
-			strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost), 18);
-
-			strncpy(dstmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost), 18);
-
-			if(is_incoming_to_eth1 == 1){
-				printf("On %s ", ETH1);
-			}else{
-				printf("On %s ", ETH0);
-			}
-		    printf("Timestamp: %d\n",(int)time(NULL));
-			printf("ID = %d\n", iphdr->ip_id);
-			printf("After srcip: %s srcmac: %s dstip: %s dstmac: %s\n",
-						src,srcmac,dest,dstmac);
-
-			inject_packet(orgeptr, packethdr->len, is_incoming_to_eth1);
-		}else{
-			printf("Packet blocked by firewall\n");
-		}
-
-
+        scanpacket = scan_packet(src,dest,1,1, IPPROTO_ICMP, SYN);
         break;
     }
-    printf(
-        "+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+\n\n");
+
+    if(scanpacket == 2){
+    	printf("Packet rejected by firewall\n");
+    	if(iphdr->ip_p == IPPROTO_UDP || iphdr->ip_p == IPPROTO_ICMP){
+    		send_reset_icmp_packet(dest, src);
+    	}else if(iphdr->ip_p == IPPROTO_TCP){
+    		send_reset_tcp_packet(dest,src, dstport, srcport);
+    	}
+    	return;
+    }else if(scanpacket == 1){
+		if(replace_destination_mac(orgeptr, dest,is_incoming_to_eth1) == -1 ) {
+			printf(" Error in replacing destination!\n");
+			return;
+		}
+
+		//replace source MAC
+		replace_source_mac(orgeptr,is_incoming_to_eth1);
+
+		strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost), 18);
+		strncpy(dstmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost), 18);
+
+		if(is_incoming_to_eth1 == 1){
+			printf("On %s ", ETH1);
+		}else{
+			printf("On %s ", ETH0);
+		}
+	    printf("Timestamp: %d\n",(int)time(NULL));
+		printf("ID = %d\n", iphdr->ip_id);
+		printf("After srcip: %s srcmac: %s dstip: %s dstmac: %s\n",
+					src,srcmac,dest,dstmac);
+
+		inject_packet(orgeptr, packethdr->len, is_incoming_to_eth1);
+    	scanpacket = 0;
+    }else{
+    	printf("Packet blocked by firewall\n");
+    	return;
+    }
+    printf("+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+\n\n");
 }
 
-void capture_packet_eth0()
-{
-//	char errbuf[PCAP_ERRBUF_SIZE];
-//	int datalink;        /* Type of datalink SLIP/PPP/Ethernet */
-//	char *ptr;                 /*Pointer to header */
-//	printf("Capture %s...........................", ETH0);
-//	printf("Handle for Device = %s",ETH0);
-//
-//
-//	if((datalink = pcap_datalink(pdeth0)) < 0 )  /* returns type of datalink */
-//	{
-//		printf("Datalink error : %s", pcap_geterr(pdeth0));
-//	}
-//	printf("Datalink = %d\n", datalink);
-
-//	int packets = -1;
+void capture_packet_eth0() {
     capture_loop(pdeth0, -1, (pcap_handler)parse_packet);
-//	packet_read(datalink,ptr,pdeth0);
-
 }
 
-void capture_packet_eth1()
-{
-//	char errbuf[PCAP_ERRBUF_SIZE];
-//	int datalink;        /* Type of datalink SLIP/PPP/Ethernet */
-//	char *ptr;                 /*Pointer to header */
-//	printf("Capture %s...........................", ETH1);
-//
-//	printf("Handle on Device = %s", ETH1);
-//	if ((pdeth1 = pcap_open_live(ETH1, BUFSIZ, 0, 0, errbuf)) == NULL)
-//	{
-//		printf("Error opening device: %s", errbuf);
-//	}
-//	printf("Handle on Device = %s", ETH0);
-//
-//	if ((pdeth0 = pcap_open_live(ETH0, BUFSIZ, 1, 0, errbuf)) == NULL)
-//	{
-//		printf("Error opening device: %s", errbuf);
-//	}
-//
-//	if((datalink = pcap_datalink(pdeth1)) < 0 )  /* returns type of datalink */
-//	{
-//		printf("Datalink error : %s", pcap_geterr(pdeth1));
-//	}
-//	printf("Datalink = %d\n", datalink);
+void capture_packet_eth1() {
     capture_loop(pdeth1, -1, (pcap_handler)parse_packet);
-//	packet_read(datalink,ptr,pdeth1);
-
 }
 
-//void packet_read(int datalink,char *ptr,pcap_t *pd)
-//{
-//	struct ether_header *eptr;
-//	int len;
-//	while(1)
-//	{
-//		ptr = next_packet(&len,pd); /* get next packet */
-//		switch(datalink)        /* check for link type */
-//		{
-//		case DLT_NULL:
-//			tcp_check(ptr + 4 , len - 4,eptr,pd, ptr); /* Loopback header = 4 bytes */
-//			break;
-//
-//		case DLT_EN10MB:
-//			eptr = (struct ether_header *) ptr;    /* Ethernet header = 14 bytes */
-//			tcp_check(ptr + 14 , len - 14, eptr,pd, ptr);
-//			break;
-//
-//		case DLT_SLIP:
-//			tcp_check(ptr + 24 , len - 24, eptr,pd, ptr);
-//			break;
-//			/* SLIP or PPP header = 24 bytes */
-//		case DLT_PPP:
-//			tcp_check(ptr + 24 , len - 24, eptr,pd, ptr);
-//			break;
-//
-//		default :
-//			printf("Unsupported datalink");
-//			break;
-//		}
-//
-//	}
-//
-//}
-//
-//
-//char *next_packet(int *len,pcap_t *pd)
-//{
-//	char *ptr;
-//	struct pcap_pkthdr hdr;
-//
-//	while((ptr = (char *) pcap_next(pd, &hdr)) == NULL); /* keep looping until packet ready */
-//	*len = hdr.caplen;                                   /* captured length */
-//	return(ptr);
-//}
-
-//void tcp_check(char *ptr, int len, struct ether_header *eptr,pcap_t *pd, char *orgptr)
-//{
-//	int hlen;
-//	struct ip *iphdr;
-//	struct tcphdr *tcph;
-//	struct icmphdr *icmph;
-//	struct udphdr *udph;
-//	char  src[16], dest[16];
-//	char srcmac[18], dstmac[18];
-//	u_int16_t sport,dport;
-//    unsigned short id, seq;
-//	struct ether_header *orgeptr;
-//	iphdr = (struct ip*) ptr;         /* Get IP header */
-//	orgeptr = (struct ether_header *) orgptr;    /* Ethernet header = 14 bytes */
-//	hlen = iphdr->ip_hl * 4;
-//	strncpy(src,inet_ntoa(iphdr->ip_src), 16);
-//
-//	strncpy(dest, inet_ntoa(iphdr->ip_dst),16);
-//	int is_incoming_to_eth1 = identify_eth0_eth1(src);
-//	printf("Found is_incoming_to_eth1 as %d\n", is_incoming_to_eth1);
-//	if(is_incoming_to_eth1 == -1){
-//		return;
-//	}
-//
-//
-//	strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost),18);
-//	strncpy(dstmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost), 18);
-//	if(is_incoming_to_eth1 == 1){
-//		printf("On %s ", ETH1);
-//	}else{
-//		printf("On %s ", ETH0);
-//	}
-//    printf("Timestamp: %d\n",(int)time(NULL));
-//	printf("ID = %d\n", iphdr->ip_id);
-//	printf("Before srcip: %s srcmac: %s dstip: %s dstmac: %s\n",
-//					src,srcmac,dest,dstmac );
-//
-//	if(src[0] == dest[0]){
-//		printf("See! this is wrong!! tcp_check ");
-//		return;
-//	}
-//
-//	//replace destination MAC
-//	if(replace_destination_mac(orgeptr, dest,is_incoming_to_eth1) == -1 ) {
-//
-//		printf("Mannnn Error in repalcing destination!\n");
-//		return;
-//	}
-//
-//	//replace source MAC
-//	replace_source_mac(orgeptr,is_incoming_to_eth1);
-//
-//	strncpy(srcmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_shost), 18);
-//
-//	strncpy(dstmac, ether_ntoa((struct ether_addr *)&orgeptr->ether_dhost), 18);
-//
-//	if(is_incoming_to_eth1 == 1){
-//		printf("On %s ", ETH1);
-//	}else{
-//		printf("On %s ", ETH0);
-//	}
-//    printf("Timestamp: %d\n",(int)time(NULL));
-//	printf("ID = %d\n", iphdr->ip_id);
-//	printf("After srcip: %s srcmac: %s dstip: %s dstmac: %s\n",
-//				src,srcmac,dest,dstmac);
-//	switch(iphdr->ip_p){
-//	case IPPROTO_ICMP:
-//		icmph = (struct icmphdr *)ptr;
-//		sport = 1;
-//		dport = 1;
-//		if(scan_packet(src,dest,sport,dport, IPPROTO_ICMP, SYN) != 0 ) {
-////			printf("Packet allowed by firewall\n");
-//			memcpy(&id, (u_char*)icmph+4, 2);
-//			memcpy(&seq, (u_char*)icmph+6, 2);
-//
-//			printf("tcp check----------------ID:%d Seq:%d\n", ntohs(id), ntohs(seq));
-//			printf("------------%s %s %d %d\n", src, dest, sport, dport);
-////			printf("Calling inject packet with %d\n", is_incoming_to_eth1);
-////			if(16384 == ntohs(seq)){
-////				printf("Culprit in tcp_check!!!!!!!");
-////				return;
-////			}
-//
-//			inject_packet(orgptr, len+14, is_incoming_to_eth1);
-//		}else{
-//			printf("Packet blocked by firewall\n");
-//		}
-//
-//
-//		break;
-//	case IPPROTO_TCP:
-//		ptr += hlen;
-//		tcph = (struct tcphdr *)ptr;  /* Get source and dest port */
-//		sport = ntohs(tcph->source);
-//		dport = ntohs(tcph->dest);
-//		ptr += sizeof(struct tcphdr);
-//		break;
-//	case IPPROTO_UDP:
-//		//port
-//		break;
-//	default:
-//		break;
-//	}
-//
-//
-//}
 
 int identify_eth0_eth1(char* src){
 	int i =0, dot_count = 0;
@@ -547,10 +361,6 @@ int identify_eth0_eth1(char* src){
 }
 void inject_packet(struct ether_header *ptr, int len, int is_incoming_to_eth1){
 	printf("%%%%%% inject_packet   %d\n", is_incoming_to_eth1);
-//	struct ip *iphdr;
-//	struct ether_header *orgeptr;
-
-//	orgeptr = (struct ether_header *) ptr;
 	printf("%s\n",ether_ntoa((struct ether_addr *)&ptr->ether_shost));
 	printf("%s\n",ether_ntoa((struct ether_addr *)&ptr->ether_dhost));
 	if(is_incoming_to_eth1 == 1){
@@ -568,15 +378,12 @@ int  replace_destination_mac(struct ether_header *eptr, char* dest, int is_incom
 	struct ether_addr *ether_d;
 	int i;
 	char *macptr = NULL;
-//	char macptr [20];
 //	printf("replace_destination_mac is called with is_incoming_to_eth1 as %d\n", is_incoming_to_eth1);
-//	if((macptr = checkinArpTable(dest)) == NULL){
-//		if(strcmp(dest, "30.10.1.130") == 0) strcpy(macptr,"00:0C:29:D3:DE:86");
-//		if(strcmp(dest, "20.10.1.130") == 0) strcpy(macptr,"00:0C:29:E6:BB:41");
+	if((macptr = checkinArpTable(dest)) == NULL){
 		macptr = arping(dest, is_incoming_to_eth1);
-//		if(macptr != NULL)
-//			addinArpTable(dest, macptr);
-//	}
+		if(macptr != NULL)
+			addinArpTable(dest, macptr);
+	}
 	if(macptr != NULL){
 		ether_d = ether_aton (macptr);
 		if(macptr != NULL){
@@ -762,7 +569,7 @@ char* checkinArpTable(char* ip){
 }
 
 char* arping(char* ip, int is_incoming_to_eth1){
-//	printf("arpinging with %d", is_incoming_to_eth1);
+	printf("arpinging with %d", is_incoming_to_eth1);
 	char cmd[50] = "arping -c 1 -I ";
 	if(is_incoming_to_eth1 == 1){
 		strcat(cmd,ETH0);
@@ -871,9 +678,6 @@ void readrulesfile(char *rules_file){
 int isAllowedByFirewall(char *src,char *dest,u_int16_t sport,u_int16_t dport){
 	    uint32_t sip = inet_addr(src);
 		uint32_t dip = inet_addr(dest);
-//		printf("sip = %u\n", sip);
-//		printf("dip = %u\n", dip);
-
 		struct rule_struct  *s, *tmp;
 
 		HASH_ITER(hh, ruletable, s, tmp) {
@@ -983,5 +787,95 @@ int scan_packet(char *src,char *dest,u_int16_t sport,u_int16_t dport, u_int8_t p
 		return 1;
 	}
 
+}
+
+
+unsigned short csum (unsigned short *buf, int nwords)
+{
+  unsigned long sum;
+  for (sum = 0; nwords > 0; nwords--)
+    sum += *buf++;
+  sum = (sum >> 16) + (sum & 0xffff);
+  sum += (sum >> 16);
+  return ~sum;
+}
+
+void send_reset_icmp_packet(char* src_ip, char* dst_ip){
+	  int s = socket (PF_INET, SOCK_RAW, IPPROTO_ICMP);	/* open raw socket */
+	  char datagram[4096];
+	  struct ip *iph = (struct ip *) datagram;
+	  struct icmphdr *icmph = (struct icmphdr *) (datagram + sizeof (struct ip));
+	  struct sockaddr_in sin;
+
+	  sin.sin_family = AF_INET;
+	  sin.sin_addr.s_addr = inet_addr (dst_ip);
+
+	  memset (datagram, 0, 4096);	/* zero out the buffer */
+
+	  iph->ip_hl = 5;
+	  iph->ip_v = 4;
+	  iph->ip_tos = 0;
+	  iph->ip_len = sizeof (struct ip) + sizeof (struct icmphdr);	/* no payload */
+	  iph->ip_ttl = 255;
+	  iph->ip_p = IPPROTO_ICMP;
+	  iph->ip_sum = 0;
+	  iph->ip_src.s_addr = inet_addr (src_ip);
+	  iph->ip_dst.s_addr = sin.sin_addr.s_addr;
+	  iph->ip_sum = csum ((unsigned short *) datagram, iph->ip_len >> 1);
+
+	  icmph->code = 13;
+	  icmph->type = 3;
+	  icmph->checksum = csum ((unsigned short *) icmph, sizeof(struct icmphdr));
+	  {
+	    int one = 1;
+	    const int *val = &one;
+	    if (setsockopt (s, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
+	      printf ("Warning: Cannot set HDRINCL!\n");
+	  }
+
+	  if (sendto (s, datagram, iph->ip_len,	0,(struct sockaddr *) &sin,	sizeof (sin)) < 0)
+		  printf ("error\n");
+}
+
+void send_reset_tcp_packet(char* src_ip, char* dst_ip, u_int16_t src_prt, u_int16_t dst_prt){
+	  int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);	/* open raw socket */
+	  char datagram[4096];
+	  struct ip *iph = (struct ip *) datagram;
+	  struct tcphdr *tcph = (struct tcphdr *) (datagram + sizeof (struct ip));
+	  struct sockaddr_in sin;
+	  sin.sin_family = AF_INET;
+	  sin.sin_port = htons (dst_prt);
+	  sin.sin_addr.s_addr = inet_addr (dst_ip);
+
+	  memset (datagram, 0, 4096);	/* zero out the buffer */
+
+	  iph->ip_hl = 5;
+	  iph->ip_v = 4;
+	  iph->ip_tos = 0;
+	  iph->ip_len = sizeof (struct ip) + sizeof (struct tcphdr);	/* no payload */
+	  iph->ip_ttl = 255;
+	  iph->ip_p = 6;
+	  iph->ip_sum = 0;
+	  iph->ip_src.s_addr = inet_addr (src_ip);
+	  iph->ip_dst.s_addr = sin.sin_addr.s_addr;
+	  iph->ip_sum = csum ((unsigned short *) datagram, iph->ip_len >> 1);
+
+	  tcph->doff = 5;
+	  tcph->source = htons (src_prt);
+	  tcph->dest = htons (dst_prt);
+	  tcph->ack_seq = htonl(1);
+	  tcph->seq = htonl(0);
+	  tcph->ack = 1;
+	  tcph->rst = 1;
+	  tcph->window = htonl (10);
+	  tcph->check = csum ((unsigned short *) tcph, sizeof(struct tcphdr));
+	  {
+	    int one = 1;
+	    const int *val = &one;
+	    if (setsockopt (s, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
+	      printf ("Warning: Cannot set HDRINCL!\n");
+	  }
+	  if (sendto (s, datagram, iph->ip_len,	0,(struct sockaddr *) &sin,	sizeof (sin)) < 0)
+		  printf ("error\n");
 }
 
