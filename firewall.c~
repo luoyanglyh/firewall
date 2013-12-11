@@ -143,14 +143,14 @@ int main(int argc,char *argv[])
 	else
 		printf("\n Thread created successfully\n");
 
-	err = pthread_create((tid + 1), NULL, capture_packet_eth0, (void *) 1);
-	if (err != 0)
-		printf("\ncan't create thread :[%s]", strerror(err));
-	else
-		printf("\n Thread created successfully\n");
+//	err = pthread_create((tid + 1), NULL, capture_packet_eth0, (void *) 1);
+//	if (err != 0)
+//		printf("\ncan't create thread :[%s]", strerror(err));
+//	else
+//		printf("\n Thread created successfully\n");
 
 	pthread_join((tid[0]), NULL);
-	pthread_join((tid[1]), NULL);
+//	pthread_join((tid[1]), NULL);
 
 	pthread_exit(NULL);
 	return(0);
@@ -282,7 +282,11 @@ void parse_packet(u_char *user, struct pcap_pkthdr *packethdr,
     if(scanpacket == 2){
     	printf("Packet rejected by firewall\n");
     	if(iphdr->ip_p == IPPROTO_UDP || iphdr->ip_p == IPPROTO_ICMP){
-    		send_reset_icmp_packet(dest, src);
+    		if(is_incoming_to_eth1){
+    			send_reset_icmp_packet(ETH1, src);
+    		}else{
+    			send_reset_icmp_packet(ETH0, src);
+    		}
     	}else if(iphdr->ip_p == IPPROTO_TCP){
     		send_reset_tcp_packet(dest,src, dstport, srcport);
     	}
@@ -444,8 +448,8 @@ void dispatcher_handler(u_char *dumpfile,
 	u_int16_t sport,dport;
 	const struct pcap_pkthdr *orgheader = header;
 	const u_char *org_pkt_data = pkt_data;
-	struct pcap_pkthdr *newheader;
-	u_char *new_pkt_data;
+//	struct pcap_pkthdr *newheader;
+//	u_char *new_pkt_data;
 
 
 	iphdr = (struct ip*)(pkt_data+14);         /* Get IP header */
@@ -537,7 +541,7 @@ void addinArpTable(char*ip, char*mac){
 }
 
 char* checkinArpTable(char* ip){
-	struct my_struct *t, *s,*tmp;
+	struct my_struct *t;
 	struct timeval tv;
 	time_t current;
 	time_t prev;
@@ -801,6 +805,7 @@ unsigned short csum (unsigned short *buf, int nwords)
 }
 
 void send_reset_icmp_packet(char* src_ip, char* dst_ip){
+		printf("send_reset_icmp_packet Called");
 	  int s = socket (PF_INET, SOCK_RAW, IPPROTO_ICMP);	/* open raw socket */
 	  char datagram[4096];
 	  struct ip *iph = (struct ip *) datagram;
@@ -832,9 +837,11 @@ void send_reset_icmp_packet(char* src_ip, char* dst_ip){
 	    if (setsockopt (s, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
 	      printf ("Warning: Cannot set HDRINCL!\n");
 	  }
-
+	  printf("*************************sendto");
 	  if (sendto (s, datagram, iph->ip_len,	0,(struct sockaddr *) &sin,	sizeof (sin)) < 0)
 		  printf ("error\n");
+	  else
+		  printf("..............................");
 }
 
 void send_reset_tcp_packet(char* src_ip, char* dst_ip, u_int16_t src_prt, u_int16_t dst_prt){

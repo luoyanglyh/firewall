@@ -38,8 +38,6 @@ void send_reset_tcp_packet(char* src_ip, char* dst_ip, u_int16_t src_prt, u_int1
 void send_reset_icmp_packet(char* src_ip, char* dst_ip);
 State getState(struct tcphdr *tcph);
 
-
-
 char* ETH0 = "eth0";
 char* ETH1 = "eth1";
 char* ETH0_MAC = "00:0c:29:7b:00:69";
@@ -52,17 +50,15 @@ pcap_t *pdeth0;          /* packet capture struct pointer */
 pcap_t *pdeth1;          /* packet capture struct pointer */
 char* offline_file;
 char* rules_file;
-struct my_struct *arptable;
+struct arp_struct *arptable;
 pthread_rwlock_t lock;
 
-struct arpvalue
-{
+struct arpvalue {
 	char mac[18];
 	time_t timestamp;
 };
 
-struct filtering_rules
-{
+struct filtering_rules {
 	uint32_t s_addr_start;
 	uint32_t s_addr_end;
 
@@ -92,14 +88,13 @@ struct state_struct {
 };
 struct state_struct *statetable;
 
-struct my_struct {
+struct arp_struct {
     char ip[16];                    /* key */
     struct arpvalue val;
     UT_hash_handle hh;         /* makes this structure hashable */
 };
 
-int main(int argc,char *argv[])
-{
+int main(int argc,char *argv[]) {
 	arptable = NULL;    /* important! initialize to NULL */
     int err;
     pthread_t tid[2];
@@ -143,21 +138,20 @@ int main(int argc,char *argv[])
 	else
 		printf("\n Thread created successfully\n");
 
-//	err = pthread_create((tid + 1), NULL, capture_packet_eth0, (void *) 1);
-//	if (err != 0)
-//		printf("\ncan't create thread :[%s]", strerror(err));
-//	else
-//		printf("\n Thread created successfully\n");
+	err = pthread_create((tid + 1), NULL, capture_packet_eth0, (void *) 1);
+	if (err != 0)
+		printf("\ncan't create thread :[%s]", strerror(err));
+	else
+		printf("\n Thread created successfully\n");
 
 	pthread_join((tid[0]), NULL);
-//	pthread_join((tid[1]), NULL);
+	pthread_join((tid[1]), NULL);
 
 	pthread_exit(NULL);
 	return(0);
 }
 
-void capture_loop(pcap_t* pd, int packets, pcap_handler func)
-{
+void capture_loop(pcap_t* pd, int packets, pcap_handler func) {
     int linktype;
 
     // Determine the datalink layer type.
@@ -190,10 +184,15 @@ void capture_loop(pcap_t* pd, int packets, pcap_handler func)
         printf("pcap_loop failed: %s\n", pcap_geterr(pd));
 }
 
+void capture_packet_eth0() {
+    capture_loop(pdeth0, -1, (pcap_handler)parse_packet);
+}
 
-void parse_packet(u_char *user, struct pcap_pkthdr *packethdr,
-                  u_char *packetptr)
-{
+void capture_packet_eth1() {
+    capture_loop(pdeth1, -1, (pcap_handler)parse_packet);
+}
+
+void parse_packet(u_char *user, struct pcap_pkthdr *packethdr, u_char *packetptr){
 	struct ether_header *orgeptr;
     struct ip* iphdr;
     struct icmphdr* icmphdr;
@@ -322,15 +321,6 @@ void parse_packet(u_char *user, struct pcap_pkthdr *packethdr,
     printf("+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+\n\n");
 }
 
-void capture_packet_eth0() {
-    capture_loop(pdeth0, -1, (pcap_handler)parse_packet);
-}
-
-void capture_packet_eth1() {
-    capture_loop(pdeth1, -1, (pcap_handler)parse_packet);
-}
-
-
 int identify_eth0_eth1(char* src){
 	int i =0, dot_count = 0;
 	printf("identify_eth0_eth1 for %s\n", src);
@@ -364,9 +354,6 @@ int identify_eth0_eth1(char* src){
 
 }
 void inject_packet(struct ether_header *ptr, int len, int is_incoming_to_eth1){
-	printf("%%%%%% inject_packet   %d\n", is_incoming_to_eth1);
-	printf("%s\n",ether_ntoa((struct ether_addr *)&ptr->ether_shost));
-	printf("%s\n",ether_ntoa((struct ether_addr *)&ptr->ether_dhost));
 	if(is_incoming_to_eth1 == 1){
 		printf("Injecting on eth0\n");
 		pcap_inject(pdeth0,ptr,len);
@@ -382,7 +369,6 @@ int  replace_destination_mac(struct ether_header *eptr, char* dest, int is_incom
 	struct ether_addr *ether_d;
 	int i;
 	char *macptr = NULL;
-//	printf("replace_destination_mac is called with is_incoming_to_eth1 as %d\n", is_incoming_to_eth1);
 	if((macptr = checkinArpTable(dest)) == NULL){
 		macptr = arping(dest, is_incoming_to_eth1);
 		if(macptr != NULL)
@@ -403,7 +389,6 @@ int  replace_destination_mac(struct ether_header *eptr, char* dest, int is_incom
 void replace_source_mac(struct ether_header *eptr, int is_incoming_to_eth1){
 	struct ether_addr *ether_d;
 	int i;
-//	printf("replace_source_mac called with %d\n", is_incoming_to_eth1);
 	if(is_incoming_to_eth1 == 0){
 		ether_d = ether_aton (ETH1_MAC);
 	}else if(is_incoming_to_eth1 == 1){
@@ -436,9 +421,7 @@ State getState(struct tcphdr *tcph) {
 	return OTHER;
 }
 
-void dispatcher_handler(u_char *dumpfile,
-		const struct pcap_pkthdr *header, const u_char *pkt_data)
-{
+void dispatcher_handler(u_char *dumpfile, const struct pcap_pkthdr *header, const u_char *pkt_data) {
 	int hlen;
 	struct ip *iphdr;
 	char src[16], dest[16];
@@ -448,9 +431,6 @@ void dispatcher_handler(u_char *dumpfile,
 	u_int16_t sport,dport;
 	const struct pcap_pkthdr *orgheader = header;
 	const u_char *org_pkt_data = pkt_data;
-//	struct pcap_pkthdr *newheader;
-//	u_char *new_pkt_data;
-
 
 	iphdr = (struct ip*)(pkt_data+14);         /* Get IP header */
 
@@ -506,7 +486,7 @@ void dispatcher_handler(u_char *dumpfile,
 }
 
 void addinArpTable(char*ip, char*mac){
-	struct my_struct *t, *s, *u, *tmp;
+	struct arp_struct *t, *s, *u, *tmp;
 	struct timeval tv;
 	char addip[16];
 	strncpy(addip, ip, 16);
@@ -521,7 +501,7 @@ void addinArpTable(char*ip, char*mac){
 	pthread_rwlock_unlock(&lock);
 
 	if(t == NULL){
-		s = malloc(sizeof(struct my_struct));
+		s = malloc(sizeof(struct arp_struct));
 		strncpy(s->ip, addip, 16);
 		strncpy(s->val.mac, addmac, 18);
 		gettimeofday(&tv,NULL);
@@ -541,7 +521,7 @@ void addinArpTable(char*ip, char*mac){
 }
 
 char* checkinArpTable(char* ip){
-	struct my_struct *t;
+	struct arp_struct *t;
 	struct timeval tv;
 	time_t current;
 	time_t prev;
@@ -564,11 +544,11 @@ char* checkinArpTable(char* ip){
 			free(t);
 			return NULL;
 		}else{
-//			printf("Already present ip - %s. returning it\n", checkip);
+			printf("Already present ip - %s. returning it\n", checkip);
 			return t->val.mac;
 		}
 	}
-//	printf("Not in arptable %s\n", checkip);
+	printf("Not in arptable %s\n", checkip);
 	return NULL;
 }
 
@@ -614,7 +594,6 @@ char* arping(char* ip, int is_incoming_to_eth1){
 		printf("mac is null\n");
 	return macptr;
 }
-//Callback function called by libpcap for every incoming packet
 
 void readrulesfile(char *rules_file){
 	FILE *fp;
@@ -675,7 +654,6 @@ void readrulesfile(char *rules_file){
 		}
 
 	}
-//		printf("%d",scan_packet("20.10.1.130", "30.10.1.130", 123, 1234));
 	fclose(fp);
 }
 
@@ -793,9 +771,7 @@ int scan_packet(char *src,char *dest,u_int16_t sport,u_int16_t dport, u_int8_t p
 
 }
 
-
-unsigned short csum (unsigned short *buf, int nwords)
-{
+unsigned short csum (unsigned short *buf, int nwords) {
   unsigned long sum;
   for (sum = 0; nwords > 0; nwords--)
     sum += *buf++;
@@ -837,11 +813,8 @@ void send_reset_icmp_packet(char* src_ip, char* dst_ip){
 	    if (setsockopt (s, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
 	      printf ("Warning: Cannot set HDRINCL!\n");
 	  }
-	  printf("*************************sendto");
 	  if (sendto (s, datagram, iph->ip_len,	0,(struct sockaddr *) &sin,	sizeof (sin)) < 0)
 		  printf ("error\n");
-	  else
-		  printf("..............................");
 }
 
 void send_reset_tcp_packet(char* src_ip, char* dst_ip, u_int16_t src_prt, u_int16_t dst_prt){
